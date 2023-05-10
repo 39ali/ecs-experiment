@@ -1,0 +1,3 @@
+[submodule "sim-ecs"]
+	path = sim-ecs
+	url = https://github.com/NSSTC/sim-ecs.git
