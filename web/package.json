@@ -5,12 +5,12 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "webpack-dev-server --port 9999"
+    "start": "webpack-dev-server --port 9999 --stats-error-details"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "sim-ecs": "file:../sim-ecs",
+    "sim-ecs": "^0.6.0",
     "three": "^0.152.2"
   },
   "devDependencies": {
