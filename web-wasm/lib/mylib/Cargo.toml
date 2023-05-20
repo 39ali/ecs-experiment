@@ -1,0 +1,44 @@
+[package]
+name = "mylib"
+version = "0.1.0"
+authors = [""]
+edition = "2021"
+
+###########[target.'cfg(target_arch = "wasm32")'.lib]
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+js-sys = "0.3.62"
+wasm-bindgen = "0.2.85"
+bevy_ecs = "0.10.1"
+dyn-clone = "1.0.11"
+lazy_static = "1.4.0"
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.5.0"
+unsafe-send-sync = "0.1.0"
+wgpu = "0.16.0"
+env_logger = "0.10.0"
+pollster = "0.3.0"
+console_log = "1.0.0"
+console_error_panic_hook = "0.1.7"
+
+
+
+[dependencies.web-sys]
+version = "0.3.4"
+features = [
+  'Document',
+  'Element',
+  'Window',
+  "console", 
+  "InputEvent"
+  ,"HtmlInputElement"
+]
+
+
+
+
+
+
+

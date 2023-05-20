@@ -72,6 +72,7 @@ function update_transform_sys(transform: ECS.Transform, three_mesh: ECS.Mesh) {
 
 const startup = async () => {
   const ecs = await ECS;
+  ecs.start();
   const scene = new THREE.Scene();
 
   const camera = new THREE.PerspectiveCamera(

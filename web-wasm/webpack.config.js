@@ -14,7 +14,9 @@ module.exports = {
       template: "index.html",
     }),
     new WasmPackPlugin({
-      crateDirectory: path.resolve(__dirname, "."),
+      crateDirectory: path.resolve(__dirname, "./lib/mylib"),
+      outDir: "./../../pkg",
+      // extraArgs: "-- --crate-type cdylib ",
     }),
     // Have this example work in Edge which doesn't ship `TextEncoder` or
     // `TextDecoder` at this time.
@@ -23,7 +25,7 @@ module.exports = {
       TextEncoder: ["text-encoding", "TextEncoder"],
     }),
   ],
-  mode: "development",
+  //   mode: "development",
   experiments: {
     asyncWebAssembly: true,
   },

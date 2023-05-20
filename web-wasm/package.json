@@ -1,7 +1,8 @@
 {
   "scripts": {
     "build": "webpack",
-    "serve": "webpack serve"
+    "serve": "RUSTFLAGS=--cfg=web_sys_unstable_apis webpack serve --mode=development",
+    "release": "webpack serve --mode=production"
   },
   "dependencies": {
     "three": "^0.152.2"

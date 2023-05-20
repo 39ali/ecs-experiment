@@ -7,8 +7,6 @@ use wasm_bindgen::prelude::*;
 use bevy_ecs::prelude::*;
 use web_sys::console;
 
-extern crate serde;
-
 #[macro_use]
 mod animation;
 use animation::*;
@@ -83,47 +81,6 @@ lazy_static! {
     static ref SCHEDULE: RwLock<Schedule> = RwLock::new(Schedule::default());
 }
 
-#[wasm_bindgen(start)]
-fn start() {
-    {
-        let res = AnimationSystemInfo::default();
-        let world = WORLD.write();
-        world.unwrap().insert_resource(res);
-    }
-    // Create a new Schedule, which defines an execution strategy for Systems
-    {
-        let mut schedule = SCHEDULE.write().unwrap();
-        schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
-        schedule.add_system(update_transform_sys);
-        schedule.add_system(update_time);
-        add_to_animation_sys!(schedule, Transform);
-
-        //one time sys
-        {
-            let mut schedule = Schedule::default();
-            schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
-            schedule.add_system(init_animations_buttons_sys);
-            let mut world = WORLD.write().unwrap();
-            schedule.run(&mut world);
-        }
-    }
-
-    // run our logic loop
-    {
-        let f = std::rc::Rc::new(std::cell::RefCell::new(None));
-        let g = f.clone();
-        *g.borrow_mut() = Some(Closure::new(move || {
-            {
-                let mut world = { &mut *WORLD.write().unwrap() };
-                let mut schedule = SCHEDULE.write().unwrap();
-                schedule.run(&mut world);
-            }
-            request_animation_frame(f.borrow().as_ref().unwrap());
-        }));
-        request_animation_frame(g.borrow().as_ref().unwrap());
-    }
-}
-
 #[wasm_bindgen]
 pub fn create_entity_with_mesh(mesh_index: u32) {
     {
@@ -189,5 +146,66 @@ pub fn add_system(func: &js_sys::Function, independent: bool) {
 
         let mut schedule = SCHEDULE.write().unwrap();
         schedule.add_system(fc);
+    }
+}
+
+pub fn setup() {
+    {
+        let res = AnimationSystemInfo::default();
+        let world = WORLD.write();
+        world.unwrap().insert_resource(res);
+    }
+    // Create a new Schedule, which defines an execution strategy for Systems
+    {
+        let mut schedule = SCHEDULE.write().unwrap();
+        schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
+        schedule.add_system(update_transform_sys);
+        schedule.add_system(update_time);
+        add_to_animation_sys!(schedule, Transform);
+
+        //one time sys
+        {
+            let mut schedule = Schedule::default();
+            schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
+            #[cfg(target_arch = "wasm32")]
+            {
+                schedule.add_system(init_animations_buttons_sys);
+            }
+            let mut world = WORLD.write().unwrap();
+            schedule.run(&mut world);
+        }
+    }
+}
+
+pub fn run() {
+    // run our logic loop
+    #[cfg(target_arch = "wasm32")]
+    {
+        let f = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let g = f.clone();
+        *g.borrow_mut() = Some(Closure::new(move || {
+            {
+                let mut world = { &mut *WORLD.write().unwrap() };
+                let mut schedule = SCHEDULE.write().unwrap();
+                schedule.run(&mut world);
+            }
+            request_animation_frame(f.borrow().as_ref().unwrap());
+        }));
+        request_animation_frame(g.borrow().as_ref().unwrap());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {}
+}
+
+#[wasm_bindgen]
+pub fn start() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+        console_log::init().expect("could not initialize logger");
+        setup();
+        run();
+        // console_log::init_with_level(Level::Debug);
+        // wasm_bindgen_futures::spawn_local(run());
     }
 }
