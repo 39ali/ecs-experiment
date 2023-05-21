@@ -5,10 +5,14 @@ edition = "2021"
 
 
 [dependencies]
+mylib = {path ="../../lib/mylib"}
+
 bevy_ecs = "0.10.1"
 dyn-clone = "1.0.11"
 lazy_static = "1.4.0"
 wgpu = "0.16.0"
 env_logger = "0.10.0"
-mylib = {path ="../../lib/mylib"}
+log = "0.4.17"
+winit = "0.27"
+pollster = "0.3.0"
 

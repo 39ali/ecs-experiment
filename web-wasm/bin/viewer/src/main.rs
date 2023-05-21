@@ -1,11 +1,6 @@
-use mylib::{run, setup};
+use mylib::run;
 
-// use ecs::*;
 fn main() {
-    // #[cfg(not(target_arch = "wasm32"))]
-    {
-        env_logger::init();
-        setup();
-        run();
-    }
+    env_logger::init();
+    pollster::block_on(run());
 }
