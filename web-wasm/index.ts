@@ -130,5 +130,6 @@ const startup2 = async () => {
 };
 
 window.onload = () => {
-  startup2();
+  startup();
+  // startup2();
 };

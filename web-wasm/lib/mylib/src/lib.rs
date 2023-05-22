@@ -65,23 +65,21 @@ impl TweenTarget<Transform> for TransformPositionXTween {
 }
 
 fn update_transform_sys(mut query: Query<(&Transform, &mut Mesh)>) {
-    if false {
-        let js_sys = JS_SYSTEMS.borrow_mut();
-        let js_func = match js_sys.get("update_transform_sys") {
-            Some(func) => func,
-            None => {
-                console::log_1(&format!("js Function was not found ! {:?}", 0).into());
-                panic!()
-            }
-        };
-
-        for (transform, mesh) in &mut query {
-            let transform = serde_wasm_bindgen::to_value(transform).unwrap();
-
-            let mesh = serde_wasm_bindgen::to_value(mesh.as_ref()).unwrap();
-
-            js_func.call2(&JsValue::null(), &transform, &mesh).unwrap();
+    let js_sys = JS_SYSTEMS.borrow_mut();
+    let js_func = match js_sys.get("update_transform_sys") {
+        Some(func) => func,
+        None => {
+            console::log_1(&format!("js Function was not found ! {:?}", 0).into());
+            panic!()
         }
+    };
+
+    for (transform, mesh) in &mut query {
+        let transform = serde_wasm_bindgen::to_value(transform).unwrap();
+
+        let mesh = serde_wasm_bindgen::to_value(mesh.as_ref()).unwrap();
+
+        js_func.call2(&JsValue::null(), &transform, &mesh).unwrap();
     }
 }
 
@@ -179,9 +177,10 @@ pub async fn setup() -> (winit::window::Window, EventLoop<()>) {
     {
         let mut schedule = SCHEDULE.write().unwrap();
         schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
-        schedule.add_system(update_transform_sys);
+
         #[cfg(target_arch = "wasm32")]
         {
+            schedule.add_system(update_transform_sys);
             schedule.add_system(update_time);
         }
         add_to_animation_sys!(schedule, Transform);
