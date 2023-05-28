@@ -2,20 +2,22 @@
   "scripts": {
     "build": "webpack",
     "serve": "RUSTFLAGS=--cfg=web_sys_unstable_apis webpack serve --mode=development",
+    "serve-webgl": "webgl=true RUSTFLAGS=--cfg=web_sys_unstable_apis webpack serve --mode=development",
     "release": "RUSTFLAGS=--cfg=web_sys_unstable_apis webpack serve --mode=production"
   },
   "dependencies": {
+    "hook-shell-script-webpack-plugin": "^0.3.0",
     "three": "^0.152.2"
   },
   "devDependencies": {
+    "@types/three": "^0.152.0",
     "@wasm-tool/wasm-pack-plugin": "1.5.0",
-    "text-encoding": "^0.7.0",
     "html-webpack-plugin": "^5.3.2",
+    "text-encoding": "^0.7.0",
+    "ts-loader": "^9.4.2",
+    "typescript": "^5.0.4",
     "webpack": "^5.49.0",
     "webpack-cli": "^4.7.2",
-    "webpack-dev-server": "^3.11.2",
-    "@types/three": "^0.152.0",
-    "ts-loader": "^9.4.2",
-    "typescript": "^5.0.4"
+    "webpack-dev-server": "^3.11.2"
   }
 }

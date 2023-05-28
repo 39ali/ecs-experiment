@@ -3,6 +3,8 @@ const HtmlWebpackPlugin = require("html-webpack-plugin");
 const webpack = require("webpack");
 const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
+const is_webgl = process.env.webgl ? true : false;
+
 module.exports = {
   entry: "./index.ts",
   output: {
@@ -16,8 +18,9 @@ module.exports = {
     new WasmPackPlugin({
       crateDirectory: path.resolve(__dirname, "./lib/mylib"),
       outDir: "./../../pkg",
-      // extraArgs: "-- --crate-type cdylib ",
+      extraArgs: is_webgl ? "-- --features webgl" : "-- --features webgpu",
     }),
+
     // Have this example work in Edge which doesn't ship `TextEncoder` or
     // `TextDecoder` at this time.
     new webpack.ProvidePlugin({

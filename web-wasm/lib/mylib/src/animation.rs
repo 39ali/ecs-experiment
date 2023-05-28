@@ -355,9 +355,9 @@ pub fn animation_sys<T: Component + Debug>(
         if animationInfo.currentTime < 0.0 || animationInfo.currentTime > animationInfo.totalTime {
             return;
         }
-
-        animationInfo.currentTime += animationInfo.dt;
     }
+
+    animationInfo.currentTime += animationInfo.dt;
 }
 
 pub fn animation_controller_sys<T: Component + Debug>(

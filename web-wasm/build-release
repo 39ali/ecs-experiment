@@ -1,0 +1,1 @@
+cp ./pkg/index_bg.wasm ./pkg/index_bg_debug.wasm  && rm ./pkg/index_bg.wasm  && wasm-opt -Oz -o ./pkg/index_bg.wasm ./pkg/index_bg_debug.wasm

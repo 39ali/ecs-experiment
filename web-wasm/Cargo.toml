@@ -10,4 +10,4 @@ exclude =[]
 [profile.release]
 lto = true
 opt-level = 's'
-strip = true
+#strip = true

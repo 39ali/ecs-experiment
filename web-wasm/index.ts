@@ -18,56 +18,14 @@ function RenderSys() {
 import * as ECS from "./pkg";
 
 // init ecs
-function update_transform_sys(transform: ECS.Transform, three_mesh: ECS.Mesh) {
-  let mesh = meshes[three_mesh.mesh_index];
+// function update_transform_sys(
+//   transform: ECS.TransformJS,
+//   three_mesh: ECS.Mesh
+// ) {
+//   let mesh = meshes[three_mesh.mesh_index];
 
-  mesh.position.x = transform.position.x;
-  // console.warn(mesh.position);
-}
-
-// function animation_button_sys() {
-//   const button = document.getElementById("button") as HTMLElement;
-//   button.addEventListener("click", () => {
-//     switch (animationInfo.state) {
-//       case AnimationSystemState.Play: {
-//         animationInfo.state = AnimationSystemState.Pause;
-//         button.innerHTML = "PAUSE";
-//         break;
-//       }
-//       case AnimationSystemState.Pause: {
-//         animationInfo.state = AnimationSystemState.Play;
-//         button.innerHTML = "Play";
-//         break;
-//       }
-//     }
-//   });
-
-//   // const button_reset = document.getElementById("reset") as HTMLElement;
-//   // button_reset.addEventListener("click", () => {
-//   //   animationInfo.state = AnimationSystemState.Reset;
-//   //   animationInfo.currentTime = 0;
-//   //   button.innerHTML = "Play";
-//   // });
-
-//   // const time_input_value = document.getElementById("time") as HTMLElement;
-//   // const button_go_to_time = document.getElementById("gototime") as HTMLElement;
-
-//   // button_go_to_time.addEventListener("click", () => {
-//   //   animationInfo.state = AnimationSystemState.GoToTimeWithoutUpdate;
-//   //   animationInfo.currentTime = parseInt((time_input_value as any).value);
-//   //   button.innerHTML = "Pause";
-//   // });
-
-//   // const button_go_to_time_update = document.getElementById(
-//   //   "gototimeupdate"
-//   // ) as HTMLElement;
-
-//   // button_go_to_time_update.addEventListener("click", () => {
-//   //   animationInfo.state = AnimationSystemState.GoToTimeWithUpdate;
-//   //   animationInfo.lastTime = animationInfo.currentTime + 0;
-//   //   animationInfo.currentTime = parseInt((time_input_value as any).value);
-//   //   button.innerHTML = "Play";
-//   // });
+//   mesh.position.x = transform.position.x;
+//   // console.warn(mesh.position);
 // }
 
 const startup = async () => {
@@ -98,7 +56,7 @@ const startup = async () => {
   ecs.create_entity_with_mesh(meshes.length - 1);
 
   ecs.add_system(RenderSys, true);
-  ecs.add_system(update_transform_sys, false);
+  // ecs.add_system(update_transform_sys, false);
 };
 
 const startup2 = async () => {
@@ -126,10 +84,10 @@ const startup2 = async () => {
   // scene.add(cube);
   // meshes.push(cube);
 
-  ecs.create_entity_with_mesh(meshes.length - 1);
+  // ecs.create_entity_with_mesh(meshes.length - 1);
 };
 
 window.onload = () => {
-  startup();
-  // startup2();
+  // startup();
+  startup2();
 };
