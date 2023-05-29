@@ -30,7 +30,7 @@ use winit::{
 
 use instant::*;
 
-use crate::resources::fetch_imgs;
+use crate::resources::{fetch_imgs, load_imgs};
 
 #[wasm_bindgen]
 #[derive(Component, Copy, Clone, Debug, Serialize, Deserialize)]
@@ -228,11 +228,11 @@ fn attach_animation_system(world: &mut World, schedule: &mut Schedule) {
 }
 
 async fn create_entities_test(world: &mut World, schedule: &mut Schedule) {
-    let sprite_count = 1; //SpriteRenderer::SPRITE_COUNT ;
+    let sprite_count = 1500;
+    let texture_count = 10;
     log::warn!("create_entities_test");
-    let imgs = fetch_imgs(sprite_count).await;
+    let imgs = load_imgs(texture_count).await;
     log::warn!("imgs {:?}", imgs);
-
     for i in 0..sprite_count {
         let mut renderer = world.get_non_send_resource_mut::<SpriteRenderer>().unwrap();
 
@@ -263,36 +263,25 @@ async fn create_entities_test(world: &mut World, schedule: &mut Schedule) {
         transform.position.x = rng.gen_range(-500..500) as f32;
         transform.position.y = rng.gen_range(-250..250) as f32;
 
-        let sprite = Sprite {
-            size: Size {
+        // let sprite = Sprite {
+        //     size: Size {
+        //         size: glam::vec2(50.0, 50.0),
+        //     },
+        //     texture: imgs[i as usize].clone(),
+        //     transform,
+        // };
+
+        let texture = imgs[i % texture_count as usize].clone();
+
+        world.spawn((
+            Size {
                 size: glam::vec2(50.0, 50.0),
             },
-            texture: imgs[i as usize].clone(),
+            texture,
             transform,
-        };
-
-        world.spawn((sprite, animate));
+            animate,
+        ));
     }
-
-    // let mut seq = Seq::new();
-    // seq.then(Tween::new(
-    //     EasingFunction::QuadraticIn,
-    //     2000.0,
-    //     TransformPositionXTween {
-    //         start: 0.,
-    //         end: 100.,
-    //     },
-    // ))
-    // .then_delay(2000.)
-    // .then(Tween::new(
-    //     EasingFunction::QuadraticIn,
-    //     2000.0,
-    //     TransformPositionXTween {
-    //         start: 100.,
-    //         end: 0.,
-    //     },
-    // ));
-    // animate.add_seq(seq);
 }
 
 pub async fn setup() -> (winit::window::Window, EventLoop<()>) {

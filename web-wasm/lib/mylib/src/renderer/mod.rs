@@ -10,7 +10,9 @@ use bevy_ecs::{
     world::World,
 };
 use bytemuck::{Pod, Zeroable};
-use wgpu::{util::DeviceExt, CompositeAlphaMode, Device, Queue, Surface};
+use guillotiere::{size2, AllocId, AtlasAllocator};
+use wgpu::{util::DeviceExt, CompositeAlphaMode, Device, Limits, Queue, Surface};
+use wgsl_preprocessor::ShaderBuilder;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
@@ -51,13 +53,11 @@ struct GlobalData {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
 struct GpuSpriteData {
-    transform: [[f32; 4]; 4], //0
-                              // pad0: f32,
-                              // pad1: f32,
-                              // uv_offset: [f32; 2],      //16
-                              // uv_scale: [f32; 2],       //24
-                              // texture_index: u32,       //32
-} //36
+    transform: [[f32; 4]; 4],
+    uv_offset: [f32; 2],
+    uv_scale: [f32; 2],
+    texture_layer: [f32; 4],
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -75,9 +75,10 @@ impl Vertex {
 struct GpuTexture {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
+    width: u32,
+    height: u32,
 }
 
-#[derive(Resource)]
 pub struct SpriteRenderer {
     adapter: wgpu::Adapter,
     device: wgpu::Device,
@@ -86,19 +87,25 @@ pub struct SpriteRenderer {
     queue: wgpu::Queue,
     global_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    bind_group_layout: wgpu::BindGroupLayout,
     sprite_data_cpu: Vec<GpuSpriteData>,
     sprite_data_buffer: wgpu::Buffer,
+    sprite_data_buffer_update: RefCell<bool>,
     entities_to_index: HashMap<Entity, u32>,
-    staging_buffer: wgpu::Buffer,
     vertex_buffer: wgpu::Buffer,
-    textures: HashMap<u32, GpuTexture>,
-    bind_group_layout: wgpu::BindGroupLayout,
+    texture: GpuTexture,
     sampler: wgpu::Sampler,
+    atlas: AtlasAllocator,
+    limits: wgpu::Limits,
+    texture_map: HashMap<String, AllocId>,
 }
 
 impl SpriteRenderer {
-    pub const SPRITE_COUNT: u64 = 128;
-    pub const SPRITE_PER_DRAW_CALL_MAX_COUNT: u64 = 1000;
+    // pub const SPRITE_COUNT: u64 = 128;
+    #[cfg(feature = "webgl")]
+    const SPRITE_PER_DRAW_CALL_MAX_COUNT: u64 = 170;
+    #[cfg(not(feature = "webgl"))]
+    const SPRITE_PER_DRAW_CALL_MAX_COUNT: u64 = 15 * 1024;
     pub async fn new(window: &Window) -> Self {
         let backends = wgpu::util::backend_bits_from_env().unwrap_or_else(wgpu::Backends::all);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -170,7 +177,7 @@ impl SpriteRenderer {
                 label: None,
                 features: wgpu::Features::empty(),
                 // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the swapchain.
-                limits,
+                limits: limits.clone(),
             },
             None,
         ))
@@ -220,8 +227,7 @@ impl SpriteRenderer {
 
         let cam_transform = Self::create_camera(size);
 
-        let (global_buffer, sprite_data_buffer, staging_buffer) =
-            Self::create_buffers(&device, cam_transform);
+        let (global_buffer, sprite_data_buffer) = Self::create_buffers(&device, cam_transform);
 
         let vertex_buffer = Self::create_vertex_buffer(&device);
 
@@ -236,6 +242,10 @@ impl SpriteRenderer {
             ..Default::default()
         });
 
+        let texture = Self::create_atlas_texture(&limits, &device);
+
+        let atlas = AtlasAllocator::new(size2(texture.width as i32, texture.height as i32));
+
         let bind_group = Self::create_bind_group(
             &device,
             &bind_group_layout,
@@ -243,24 +253,28 @@ impl SpriteRenderer {
             &sprite_data_buffer,
             &sampler,
             &queue,
+            &texture,
         );
 
         SpriteRenderer {
             adapter,
             device,
             queue,
+            limits,
             surface,
             pipeline: render_pipeline,
             vertex_buffer,
             global_buffer,
             sprite_data_buffer,
-            staging_buffer,
+            sprite_data_buffer_update: RefCell::new(true),
             bind_group_layout,
             bind_group,
             sampler,
             sprite_data_cpu: Vec::new(),
             entities_to_index: HashMap::new(),
-            textures: HashMap::new(),
+            atlas,
+            texture,
+            texture_map: HashMap::new(),
         }
     }
 
@@ -268,9 +282,19 @@ impl SpriteRenderer {
         device: &Device,
         current_swapchain_format: wgpu::TextureFormat,
     ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout) {
+        let source = include_str!("shader.wgsl");
+
+        #[cfg(not(feature = "webgl"))]
+        let source = source.replace(
+            "var<uniform> sprites_data: array<GpuSpriteData,170>;",
+            "var<storage,read> sprites_data: array<GpuSpriteData>;",
+        );
+
+        log::warn!("shader  :{:?}", source);
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&source)),
         });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -290,6 +314,9 @@ impl SpriteRenderer {
                     binding: 1,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
+                        #[cfg(not(feature = "webgl"))]
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        #[cfg(feature = "webgl")]
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: None,
@@ -367,35 +394,9 @@ impl SpriteRenderer {
         global_buffer: &wgpu::Buffer,
         sprite_buffer: &wgpu::Buffer,
         sampler: &wgpu::Sampler,
-
         queue: &wgpu::Queue,
+        texture: &GpuTexture,
     ) -> wgpu::BindGroup {
-        let texture_descriptor = wgpu::TextureDescriptor {
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            label: None,
-            view_formats: &[],
-        };
-
-        let texture = device.create_texture_with_data(
-            queue,
-            &wgpu::TextureDescriptor {
-                label: Some("texture"),
-                ..texture_descriptor
-            },
-            &[255, 0, 0, 255],
-        );
-
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bind_group_layout,
@@ -410,7 +411,7 @@ impl SpriteRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -467,7 +468,7 @@ impl SpriteRenderer {
     fn create_buffers(
         device: &wgpu::Device,
         cam_transform: glam::Mat4,
-    ) -> (wgpu::Buffer, wgpu::Buffer, wgpu::Buffer) {
+    ) -> (wgpu::Buffer, wgpu::Buffer) {
         let globals = GlobalData {
             cam_transform: cam_transform.to_cols_array_2d(),
         };
@@ -480,36 +481,117 @@ impl SpriteRenderer {
         });
 
         let sprite_size = std::mem::size_of::<GpuSpriteData>();
+        let size = sprite_size as u64 * SpriteRenderer::SPRITE_PER_DRAW_CALL_MAX_COUNT;
+        log::info!("size:{size:?}");
 
-        log::debug!(
-            "sprite_size :{sprite_size:?}, {:?}",
-            SpriteRenderer::SPRITE_COUNT
-        );
+        #[cfg(feature = "webgl")]
+        let usage = wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::UNIFORM;
+        #[cfg(not(feature = "webgl"))]
+        let usage = wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::STORAGE;
 
         let sprite_data_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sprite storage buffer "),
-            size: sprite_size as u64 * SpriteRenderer::SPRITE_COUNT,
-            usage: wgpu::BufferUsages::UNIFORM
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
+            size: size,
+            usage: usage,
             mapped_at_creation: false,
         });
 
-        let staging_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&[0u8; 1024 * 1024 * 256]),
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-        });
+        // let staging_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //     label: None,
+        //     contents: bytemuck::cast_slice(&[0u8; 1024]),
+        //     usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        // });
 
-        (global_buffer, sprite_data_buffer, staging_buffer)
+        (global_buffer, sprite_data_buffer)
     }
 
-    pub fn create_texture(&mut self, img_id: &String) -> u32 {
-        let img = IMGS.read().unwrap();
-        let img = img.get(img_id).unwrap();
+    fn add_texture_to_atlas(&mut self, sprite_index: u32, texture: &Texture) {
+        let (rectangle, write_texture) = match self.texture_map.get(&texture.id) {
+            Some(id) => {
+                let rectangle = self.atlas[*id];
+                (rectangle, false)
+            }
+            None => {
+                let img = IMGS.read().unwrap();
+                let img = img.get(&texture.id).unwrap();
 
-        let width = img.width();
-        let height = img.height();
+                let dimensions = img.dimensions();
+
+                let alloc = self
+                    .atlas
+                    .allocate(size2(dimensions.0 as i32, dimensions.1 as i32))
+                    .unwrap();
+
+                self.texture_map.insert(texture.id.clone(), alloc.id);
+
+                (alloc.rectangle, true)
+            }
+        };
+
+        let atlas_size = self.atlas.size();
+        let uv_offset = glam::vec2(
+            rectangle.min.x as f32 / atlas_size.width as f32,
+            rectangle.min.y as f32 / atlas_size.height as f32,
+        );
+        let uv_scale = glam::vec2(
+            (rectangle.max.x as f32 - rectangle.min.x as f32) / atlas_size.width as f32,
+            (rectangle.max.y as f32 - rectangle.min.y as f32) / atlas_size.height as f32,
+        );
+
+        self.sprite_data_cpu[sprite_index as usize].uv_offset = uv_offset.to_array();
+        self.sprite_data_cpu[sprite_index as usize].uv_scale = uv_scale.to_array();
+
+        if write_texture {
+            let img = IMGS.read().unwrap();
+            let img = img.get(&texture.id).unwrap();
+            let dimensions = img.dimensions();
+            self.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &self.texture.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: rectangle.min.x as u32,
+                        y: rectangle.min.y as u32,
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &img,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(
+                        std::num::NonZeroU32::new(dimensions.0 * 4).unwrap().into(),
+                    ),
+                    rows_per_image: Some(std::num::NonZeroU32::new(dimensions.1).unwrap().into()),
+                },
+                wgpu::Extent3d {
+                    width: dimensions.0,
+                    height: dimensions.1,
+                    depth_or_array_layers: 1,
+                },
+            );
+            // log::info!("alloc:{:?}", rectangle);
+            // log::info!("uv_Scale:{:?} , uv_offset:{:?}", uv_scale, uv_offset);
+            // log::info!("atlas_size :{:?}", atlas_size);
+        }
+
+        self.sprite_data_buffer_update.replace(true);
+        //   TODO:only upload the changed data not the whole buffer
+        // self.queue.write_buffer(
+        //     &self.sprite_data_buffer,
+        //     0,
+        //     bytemuck::cast_slice(&self.sprite_data_cpu),
+        // );
+    }
+    fn create_atlas_texture(limits: &wgpu::Limits, device: &wgpu::Device) -> GpuTexture {
+        // BUG chrome : Buffer size (268435460) exceeds the max buffer size limit (268435456)
+        // dawn adds 4 extra bytes causing the texture allocation to crash
+        let width = limits.max_texture_dimension_2d - 4;
+        let height = limits.max_texture_dimension_2d - 4;
 
         let texture_descriptor = wgpu::TextureDescriptor {
             size: wgpu::Extent3d {
@@ -526,58 +608,31 @@ impl SpriteRenderer {
             view_formats: &[],
         };
 
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("texture"),
             ..texture_descriptor
         });
 
-        // let texture = self.device.create_texture_with_data(
-        //     &self.queue,
-        //     &wgpu::TextureDescriptor {
-        //         label: Some("texture"),
-        //         ..texture_descriptor
-        //     },
-        //     &img,
-        // );
-
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let cmd = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        {
-            self.queue.write_texture(
-                texture.as_image_copy(),
-                &img,
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(std::num::NonZeroU32::new(width * 4).unwrap().into()),
-                    rows_per_image: Some(std::num::NonZeroU32::new(height).unwrap().into()),
-                },
-                wgpu::Extent3d {
-                    width: width,
-                    height: height,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-        self.queue.submit(Some(cmd.finish()));
 
         let tex = GpuTexture {
             texture,
             view: texture_view,
+            width,
+            height,
         };
 
-        let key = self.textures.len() as u32;
-        self.textures.insert(key, tex);
+        tex
+        // let key = self.textures.len() as u32;
+        // self.textures.insert(key, tex);
 
-        key
+        // key
     }
 }
 
 // systems
 impl SpriteRenderer {
-    fn on_render(sprite_renderer: NonSendMut<SpriteRenderer>) {
+    fn on_render(mut sprite_renderer: NonSendMut<SpriteRenderer>) {
         let SpriteRenderer {
             adapter,
             device,
@@ -586,6 +641,7 @@ impl SpriteRenderer {
             surface,
             bind_group,
             vertex_buffer,
+            sprite_data_buffer_update,
             ..
         } = &*sprite_renderer;
         let frame = surface
@@ -613,7 +669,64 @@ impl SpriteRenderer {
             rpass.set_bind_group(0, bind_group, &[]);
 
             rpass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            rpass.draw(0..6, 0..sprite_renderer.sprite_data_cpu.len() as u32);
+
+            if sprite_renderer.sprite_data_cpu.len() as u64 > Self::SPRITE_PER_DRAW_CALL_MAX_COUNT {
+                let batch_count = sprite_renderer.sprite_data_cpu.len()
+                    / Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as usize;
+
+                for i in 0..batch_count {
+                    // log::info!(
+                    //     "from :{:?} , to:{:?}",
+                    //     i * Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as usize,
+                    //     (i + 1) * Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as usize
+                    // );
+                    sprite_renderer.queue.write_buffer(
+                        &sprite_renderer.sprite_data_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &sprite_renderer.sprite_data_cpu[i
+                                * Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as usize
+                                ..(i + 1) * Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as usize],
+                        ),
+                    );
+
+                    rpass.draw(0..6, 0..Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as u32);
+                }
+
+                let leftovers = sprite_renderer.sprite_data_cpu.len()
+                    % Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as usize;
+                // log::warn!("draw calls count  {:?}", batch_count);
+                // log::warn!(
+                //     "sprite count {:?} , sprites_per_draw_call :{:?}",
+                //     sprite_renderer.sprite_data_cpu.len(),
+                //     Self::SPRITE_PER_DRAW_CALL_MAX_COUNT
+                // );
+                if leftovers != 0 {
+                    sprite_renderer.queue.write_buffer(
+                        &sprite_renderer.sprite_data_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &sprite_renderer.sprite_data_cpu[batch_count
+                                * Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as usize
+                                ..batch_count * Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as usize
+                                    + leftovers as usize],
+                        ),
+                    );
+
+                    rpass.draw(0..6, 0..Self::SPRITE_PER_DRAW_CALL_MAX_COUNT as u32);
+                }
+            } else {
+                if sprite_data_buffer_update.clone().take() == true {
+                    sprite_renderer.queue.write_buffer(
+                        &sprite_renderer.sprite_data_buffer,
+                        0,
+                        bytemuck::cast_slice(&sprite_renderer.sprite_data_cpu),
+                    );
+                    sprite_renderer.sprite_data_buffer_update.replace(false);
+                }
+
+                rpass.draw(0..6, 0..sprite_renderer.sprite_data_cpu.len() as u32);
+            }
         }
 
         queue.submit(Some(encoder.finish()));
@@ -626,47 +739,42 @@ impl SpriteRenderer {
     ) {
         for (transform, sprite, entity) in query.iter() {
             let scale = glam::Mat4::from_scale(glam::vec3(sprite.size.x, sprite.size.y, 1.0));
-            let sprite = GpuSpriteData {
-                transform: (transform.matrix * scale).to_cols_array_2d(),
-                // sprite_size: [sprite.size.x, sprite.size.y, 0.0, 0.0],
-            };
+            let sprite_transform = (transform.matrix * scale).to_cols_array_2d();
 
-            let index = match sprite_renderer.entities_to_index.get(&entity) {
-                Some(index) => *index,
-                None => u32::MAX,
-            };
+            match sprite_renderer.entities_to_index.get(&entity).cloned() {
+                Some(index) => {
+                    sprite_renderer.sprite_data_cpu[index as usize].transform = sprite_transform;
+                }
+                None => {
+                    let sprite = GpuSpriteData {
+                        transform: sprite_transform,
+                        uv_offset: [0.0, 0.0],
+                        uv_scale: [1.0, 1.0],
+                        texture_layer: [0.0, 0.0, 0.0, 0.0],
+                    };
 
-            if index == u32::MAX {
-                sprite_renderer.sprite_data_cpu.push(sprite);
-                let last_index = sprite_renderer.sprite_data_cpu.len() - 1;
-                sprite_renderer
-                    .entities_to_index
-                    .insert(entity, last_index as u32);
-            } else {
-                sprite_renderer.sprite_data_cpu[index as usize] = sprite;
-            }
+                    sprite_renderer.sprite_data_cpu.push(sprite);
+                    let last_index = sprite_renderer.sprite_data_cpu.len() - 1;
+                    sprite_renderer
+                        .entities_to_index
+                        .insert(entity, last_index as u32);
+                }
+            };
         }
 
-        let cmd = sprite_renderer
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        {
-            sprite_renderer.queue.write_buffer(
-                &sprite_renderer.sprite_data_buffer,
-                0,
-                bytemuck::cast_slice(&sprite_renderer.sprite_data_cpu),
-            );
-            // cmd.copy_buffer_to_buffer(
-            //     &staging_buffers[0],
-            //     0,
-            //     &vertex_buffer,
-            //     0,
-            //     std::mem::size_of_val(circle_vertices.as_slice()) as u64,
-            // )
-
-            // log::warn!("{:?}", &sprite_renderer.sprite_data_cpu);
-        }
-        sprite_renderer.queue.submit(Some(cmd.finish()));
+        sprite_renderer.sprite_data_buffer_update.replace(true);
+        // let cmd = sprite_renderer
+        //     .device
+        //     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        // {
+        // TODO:only upload the changed data not the whole buffer
+        // sprite_renderer.queue.write_buffer(
+        //     &sprite_renderer.sprite_data_buffer,
+        //     0,
+        //     bytemuck::cast_slice(&sprite_renderer.sprite_data_cpu),
+        // );
+        // }
+        // sprite_renderer.queue.submit(Some(cmd.finish()));
     }
 
     fn update_sprite_texture(
@@ -674,38 +782,8 @@ impl SpriteRenderer {
         mut sprite_renderer: NonSendMut<SpriteRenderer>,
     ) {
         for (transform, size, texture, entity) in &query {
-            log::warn!("add sprite texture to gpu {:?}", texture);
-            let texture = sprite_renderer.create_texture(&texture.id);
-
-            let texture = sprite_renderer.textures.get(&texture).unwrap();
-            let texture_view = &texture.view;
-
-            let bind_group = sprite_renderer
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &sprite_renderer.bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: sprite_renderer.global_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: sprite_renderer.sprite_data_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(texture_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: wgpu::BindingResource::Sampler(&sprite_renderer.sampler),
-                        },
-                    ],
-                });
-
-            sprite_renderer.bind_group = bind_group;
+            let sprite_index = { *sprite_renderer.entities_to_index.get(&entity).unwrap() };
+            sprite_renderer.add_texture_to_atlas(sprite_index, &texture);
         }
     }
 
@@ -718,6 +796,8 @@ impl SpriteRenderer {
         world.insert_non_send_resource(sprite_renderer);
         schedule.add_system(SpriteRenderer::on_render);
         schedule.add_system(SpriteRenderer::update_sprite_transform.after(update_transform_sys));
-        schedule.add_system(SpriteRenderer::update_sprite_texture);
+        schedule.add_system(
+            SpriteRenderer::update_sprite_texture.after(SpriteRenderer::update_sprite_transform),
+        );
     }
 }

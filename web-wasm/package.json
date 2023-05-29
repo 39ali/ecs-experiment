@@ -3,7 +3,8 @@
     "build": "webpack",
     "serve": "RUSTFLAGS=--cfg=web_sys_unstable_apis webpack serve --mode=development",
     "serve-webgl": "webgl=true RUSTFLAGS=--cfg=web_sys_unstable_apis webpack serve --mode=development",
-    "release": "RUSTFLAGS=--cfg=web_sys_unstable_apis webpack serve --mode=production"
+    "release": "RUSTFLAGS=--cfg=web_sys_unstable_apis webpack serve --mode=production",
+    "release-webgl": "webgl=true RUSTFLAGS=--cfg=web_sys_unstable_apis webpack serve --mode=production"
   },
   "dependencies": {
     "hook-shell-script-webpack-plugin": "^0.3.0",

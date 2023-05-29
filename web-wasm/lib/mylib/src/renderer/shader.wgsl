@@ -5,13 +5,11 @@ struct GlobalData{
 }; 
 struct GpuSpriteData {
     transform: mat4x4<f32> , //0
-    // sprite_size: vec4<f32> ,
-    // pad0:f32,
-    // pad1:f32,
-    // uv_offset: [f32; 2],      //16
-    // uv_scale: [f32; 2],       //24
-    // texture_index: u32,       //32
-} //36
+    uv_offset:vec2<f32>,//64
+    uv_scale:vec2<f32>,//72
+    texture_layer: vec4<f32> //80 // only x is used rest is padding
+} //96
+
 
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
@@ -22,9 +20,13 @@ struct VertexOut {
 @group(0) @binding(0)
 var<uniform> uniforms: GlobalData;
 
-// BUG: webgl `max_*_buffer_binding_size` limit 16384 even thou adapter returns 65536.
+
+
+
+// BUG: webgl `max_*_buffer_binding_size` limit is 16384 even though adapter returns 65536.
 @group(0) @binding(1)
-var<uniform> sprites_data: array<GpuSpriteData,128>;
+var<uniform> sprites_data: array<GpuSpriteData,170>;
+
 
 @group(0) @binding(2)
 var texture_array: texture_2d<f32>;
@@ -94,7 +96,7 @@ fn vs_main(
     out.position =vec4<f32>(position,0.0, 1.0f);
     out.position =uniforms.cam_transform* sprite.transform* out.position;
 
-    out.uv= vec2(uv.x ,1.0- uv.y);
+    out.uv= vec2f(uv.x , 1.0- uv.y)*sprite.uv_scale +sprite.uv_offset;
     return out;
 }
 

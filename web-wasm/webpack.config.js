@@ -33,10 +33,12 @@ module.exports = {
     asyncWebAssembly: true,
   },
 
-  //   devServer: {
-  //     // static: {
-  //     //   directory: path.join(__dirname, ""),
-  //     // },
+  // devServer: {
+  //   static: {
+  //     contentBase: path.resolve(__dirname, './assets'),
+  //     contentBasePublicPath: '/assets'
+  //   },
+
   //     devMiddleware: {
   //       writeToDisk: (filePath) => {
   //         return !/\.hot-update.*$/.test(filePath);

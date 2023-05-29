@@ -35,6 +35,7 @@ rand = "0.8.5"
 instant = "0.1"
 futures = { version = "0.3", default-features = false , features=["executor"]}
 wgsl_preprocessor = "1.1.3"
+guillotiere = "0.6.2"
 
 
 [dependencies.web-sys]
