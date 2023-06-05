@@ -228,7 +228,7 @@ fn attach_animation_system(world: &mut World, schedule: &mut Schedule) {
 }
 
 async fn create_entities_test(world: &mut World, schedule: &mut Schedule) {
-    let sprite_count = 1500;
+    let sprite_count = 5 * 100;
     let texture_count = 10;
     log::warn!("create_entities_test");
     let imgs = load_imgs(texture_count).await;
